@@ -30,6 +30,19 @@ interface RealtimeClientEvents {
 export class OpenAiRealtimeClient extends EventEmitter {
   private ws: WebSocket | undefined;
   private readonly callId: string;
+  /**
+   * Function calls the model has finished streaming arguments for, but
+   * whose enclosing response has not yet completed. The Realtime API
+   * rejects `response.create` while a response is still active
+   * (`conversation_already_has_active_response`), and
+   * `response.function_call_arguments.done` fires *before* that response's
+   * own `response.done` — so tool calls are buffered here and only handed
+   * to the caller once `response.done` confirms the response is over and
+   * it's safe to create a follow-up response with the tool's result.
+   */
+  private pendingFunctionCalls: RealtimeToolCall[] = [];
+  /** True between `response.created` and that response's `response.done`. */
+  private responseActive = false;
 
   constructor(callId: string) {
     super();
@@ -71,6 +84,9 @@ export class OpenAiRealtimeClient extends EventEmitter {
     }
 
     switch (event.type) {
+      case "response.created":
+        this.responseActive = true;
+        break;
       case "response.audio.delta": {
         const delta = event.delta as string | undefined;
         if (delta) this.emit("audioDelta", delta);
@@ -83,12 +99,18 @@ export class OpenAiRealtimeClient extends EventEmitter {
         const callId = event.call_id as string;
         const name = event.name as string;
         const argumentsJson = event.arguments as string;
-        this.emit("toolCall", { callId, name, argumentsJson });
+        // Buffered, not emitted yet — see pendingFunctionCalls above.
+        this.pendingFunctionCalls.push({ callId, name, argumentsJson });
         break;
       }
-      case "response.done":
+      case "response.done": {
+        this.responseActive = false;
+        const calls = this.pendingFunctionCalls;
+        this.pendingFunctionCalls = [];
+        for (const call of calls) this.emit("toolCall", call);
         this.emit("responseDone");
         break;
+      }
       case "conversation.item.input_audio_transcription.completed": {
         const transcript = event.transcript as string | undefined;
         if (transcript) this.emit("callerTranscript", transcript);
@@ -142,8 +164,15 @@ export class OpenAiRealtimeClient extends EventEmitter {
     this.send({ type: "input_audio_buffer.append", audio: base64Audio });
   }
 
-  /** Cancels the in-flight response — used the instant the caller barges in. */
+  /**
+   * Cancels the in-flight response — used the instant the caller barges in.
+   * A no-op when nothing is actually playing (the common case: the caller
+   * starts a normal turn rather than interrupting one) — the API rejects
+   * `response.cancel` with no active response, so guarding here avoids a
+   * spurious error on every single caller utterance.
+   */
   cancelResponse(): void {
+    if (!this.responseActive) return;
     this.send({ type: "response.cancel" });
   }
 
@@ -159,8 +188,15 @@ export class OpenAiRealtimeClient extends EventEmitter {
     this.send({ type: "response.create" });
   }
 
-  /** Injects a system-authored utterance (e.g. a silence check-in) without waiting for caller input. */
+  /**
+   * Injects a system-authored utterance (e.g. a silence check-in) without
+   * waiting for caller input. A no-op while a response is already active —
+   * creating one would be rejected by the API — so a periodic caller (like
+   * the silence check-in timer) can call this freely without first
+   * checking state itself.
+   */
   speak(instructionText: string): void {
+    if (this.responseActive) return;
     this.send({
       type: "response.create",
       response: { modalities: ["audio", "text"], instructions: instructionText },

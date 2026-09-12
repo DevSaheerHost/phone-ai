@@ -51,3 +51,33 @@ export function verifyStreamToken(token: string, callSid: string): { callId: str
 
   return { callId };
 }
+
+export type MediaStreamUpgradeResult =
+  | { ok: true; callId: string; callSid: string }
+  | { ok: false; reason: "wrong_path" | "missing_params" | "invalid_token" };
+
+/**
+ * The full gate a WebSocket upgrade request must pass before we hand it to
+ * the WebSocketServer: right path, both params present, token verifies for
+ * the claimed callSid. Pulled out of the HTTP `upgrade` handler in
+ * index.ts so this security-critical logic can be unit tested directly
+ * instead of only through a live server.
+ */
+export function authorizeMediaStreamUpgrade(pathname: string, searchParams: URLSearchParams): MediaStreamUpgradeResult {
+  if (pathname !== "/media-stream") {
+    return { ok: false, reason: "wrong_path" };
+  }
+
+  const token = searchParams.get("token");
+  const callSid = searchParams.get("callSid");
+  if (!token || !callSid) {
+    return { ok: false, reason: "missing_params" };
+  }
+
+  const verified = verifyStreamToken(token, callSid);
+  if (!verified) {
+    return { ok: false, reason: "invalid_token" };
+  }
+
+  return { ok: true, callId: verified.callId, callSid };
+}

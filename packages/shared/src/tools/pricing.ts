@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import type { DevicePricing, PartAvailability, ToolResult } from "../types.js";
-import { nonEmptyTrimmedString } from "../validation.js";
+import { likeContains, nonEmptyTrimmedString } from "../validation.js";
 import { logger } from "../logger.js";
 
 export const getRepairPriceInputSchema = z.object({
@@ -44,13 +44,13 @@ export async function getRepairPrice(
     .from("device_pricing")
     .select("*")
     .eq("active", true)
-    .ilike("model", model)
-    .ilike("part", part)
+    .ilike("model", likeContains(model))
+    .ilike("part", likeContains(part))
     .lte("valid_from", new Date().toISOString())
     .or(`valid_until.is.null,valid_until.gte.${new Date().toISOString()}`);
 
-  if (variant) query = query.ilike("variant", variant);
-  if (quality) query = query.ilike("quality", quality);
+  if (variant) query = query.ilike("variant", likeContains(variant));
+  if (quality) query = query.ilike("quality", likeContains(quality));
 
   const { data, error } = await query;
 
@@ -103,8 +103,12 @@ export async function checkPartAvailability(
   }
   const { model, part, quality } = parsed.data;
 
-  let query = supabase.from("part_availability").select("*").ilike("model", model).ilike("part", part);
-  if (quality) query = query.ilike("quality", quality);
+  let query = supabase
+    .from("part_availability")
+    .select("*")
+    .ilike("model", likeContains(model))
+    .ilike("part", likeContains(part));
+  if (quality) query = query.ilike("quality", likeContains(quality));
 
   const { data, error } = await query;
 
