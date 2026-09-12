@@ -1,0 +1,33 @@
+{
+  "name": "@phone-ai/voice-service",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "lint": "eslint \"src/**/*.ts\""
+  },
+  "dependencies": {
+    "@phone-ai/shared": "*",
+    "express": "^5.2.1",
+    "express-rate-limit": "^7.4.1",
+    "twilio": "^5.3.4",
+    "uuid": "^11.1.1",
+    "ws": "^8.18.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.7.5",
+    "@types/supertest": "^6.0.2",
+    "@types/ws": "^8.5.12",
+    "supertest": "^7.0.0",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.3",
+    "vitest": "^5.0.0"
+  }
+}

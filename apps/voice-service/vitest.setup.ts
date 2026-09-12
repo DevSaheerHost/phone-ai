@@ -1,0 +1,11 @@
+process.env.OPENAI_API_KEY = "sk-test";
+process.env.OPENAI_MODEL = "gpt-realtime";
+process.env.TELEPHONY_ACCOUNT_ID = "ACtest0000000000000000000000000000";
+process.env.TELEPHONY_AUTH_TOKEN = "test_auth_token_1234567890abcdef";
+process.env.TELEPHONY_PHONE_NUMBER = "+15551234567";
+process.env.HUMAN_TRANSFER_NUMBER = "+15559876543";
+process.env.SUPABASE_URL = "https://example.supabase.co";
+process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role-key";
+process.env.PUBLIC_BASE_URL = "https://voice.example.com";
+process.env.VOICE_WEBHOOK_SECRET = "0123456789abcdef0123456789abcdef";
+process.env.NODE_ENV = "test";
