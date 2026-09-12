@@ -7,7 +7,7 @@ import { healthRouter } from "./routes/health.js";
 import { twilioVoiceRouter } from "./routes/twilioVoice.js";
 import { twilioStatusRouter } from "./routes/twilioStatus.js";
 import { webhookRateLimiter } from "./security/rateLimit.js";
-import { verifyStreamToken } from "./security/mediaStreamAuth.js";
+import { authorizeMediaStreamUpgrade } from "./security/mediaStreamAuth.js";
 import { MediaBridge } from "./realtime/mediaBridge.js";
 
 const app = express();
@@ -34,27 +34,16 @@ const wss = new WebSocketServer({ noServer: true });
 
 server.on("upgrade", (req, socket, head) => {
   const url = new URL(req.url ?? "", "http://internal");
-  if (url.pathname !== "/media-stream") {
-    socket.destroy();
-    return;
-  }
+  const result = authorizeMediaStreamUpgrade(url.pathname, url.searchParams);
 
-  const token = url.searchParams.get("token");
-  const callSid = url.searchParams.get("callSid");
-  if (!token || !callSid) {
-    socket.destroy();
-    return;
-  }
-
-  const verified = verifyStreamToken(token, callSid);
-  if (!verified) {
-    logger.warn("media_stream_auth_rejected");
+  if (!result.ok) {
+    if (result.reason !== "wrong_path") logger.warn("media_stream_auth_rejected", { reason: result.reason });
     socket.destroy();
     return;
   }
 
   wss.handleUpgrade(req, socket, head, (ws) => {
-    const bridge = new MediaBridge(ws, supabase, verified.callId, callSid);
+    const bridge = new MediaBridge(ws, supabase, result.callId, result.callSid);
     bridge.start();
   });
 });

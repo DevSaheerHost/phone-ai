@@ -171,8 +171,29 @@ export class MediaBridge {
     });
 
     openai.on("close", () => {
-      void this.finalize(this.finalized ? undefined : "error");
+      if (this.finalized) return;
+      // The AI backend just dropped mid-call. We can't speak an apology
+      // through a closed socket, but we can still move the live call to a
+      // human over the Twilio REST API — the same recovery the spec
+      // requires for any "backend/tool failure prevents reliable
+      // assistance" case, just triggered by a hard disconnect instead of
+      // the model calling transferToHuman itself.
+      void this.handleBackendFailure();
     });
+  }
+
+  private async handleBackendFailure(): Promise<void> {
+    if (this.finalized) return;
+    const result = await transferLiveCall(this.expectedCallSid, env.HUMAN_TRANSFER_NUMBER);
+    void recordCallEvent(this.supabase, this.callId, "transfer_attempted", {
+      reason: "backend_failure",
+      ok: result.ok,
+    });
+    if (result.ok) {
+      await this.finalize("transferred_to_human", { transferredToHuman: true, transferReason: "backend_failure" });
+    } else {
+      await this.finalize("error", { errorCode: "REALTIME_CONNECTION_LOST" });
+    }
   }
 
   /** Executes a transfer/end-call decided by the AI, after it has finished speaking that turn. */

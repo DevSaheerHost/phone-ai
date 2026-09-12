@@ -12,6 +12,12 @@ export interface ToolExecutionOutcome {
   createdBookingId: string | null;
 }
 
+/**
+ * Tools whose zod schema accepts an `idempotencyKey` so a redelivered/
+ * duplicate invocation can't create a second database record.
+ */
+const IDEMPOTENT_TOOLS = new Set(["createBooking", "createServiceRequest"]);
+
 const REQUEST_TYPE_BY_TOOL: Record<string, string> = {
   getRepairPrice: "pricing_inquiry",
   checkPartAvailability: "pricing_inquiry",
@@ -49,6 +55,17 @@ export async function runToolCall(
       createdServiceRequestId: null,
       createdBookingId: null,
     };
+  }
+
+  // The model is never told about idempotency keys — it can't be relied on
+  // to invent one, and doing so wouldn't help anyway since a redelivered
+  // tool call would just generate a different one each time. Instead, the
+  // Realtime API's own function-call id (stable and unique per invocation)
+  // is used, so a genuine duplicate delivery of the *same* call is deduped
+  // by the database's unique constraint (see packages/shared/src/tools/booking.ts).
+  if (IDEMPOTENT_TOOLS.has(toolCall.name) && args !== null && typeof args === "object" && !Array.isArray(args)) {
+    const record = args as Record<string, unknown>;
+    if (!record.idempotencyKey) record.idempotencyKey = toolCall.callId;
   }
 
   const result = await executeTool(supabase, toolCall.name, args);

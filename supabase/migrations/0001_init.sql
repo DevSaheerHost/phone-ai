@@ -71,6 +71,18 @@ as $$
   select exists (select 1 from admin_roles where user_id = auth.uid());
 $$;
 
+-- RLS on the gate table itself, added after is_admin() so the policy
+-- below can reference it. is_admin() reads this table via a SECURITY
+-- DEFINER function owned by the migration role, so it bypasses this very
+-- policy for its own lookup (the standard Postgres/Supabase pattern for a
+-- self-referential admin-check table) — this only blocks direct
+-- reads/writes from the anon/authenticated Supabase client. Deliberately
+-- no insert/update/delete policy: nobody can grant themselves admin
+-- through the API. Rows are provisioned only via the service-role key
+-- (see README "Granting dashboard access to a staff member").
+alter table admin_roles enable row level security;
+create policy "admins can view admin_roles" on admin_roles for select using (is_admin());
+
 -- ---------------------------------------------------------------------------
 -- shop_config — single source of truth for shop identity/policy. Enforced
 -- as a singleton via the check constraint on id.
@@ -191,7 +203,9 @@ for each row execute function set_updated_at();
 -- ---------------------------------------------------------------------------
 -- bookings / service_requests — idempotency_key lets the voice service
 -- safely retry a tool call (e.g. after a network hiccup) without creating
--- duplicate records.
+-- duplicate records. It's a plain string, not a uuid: the voice-service
+-- populates it from the OpenAI Realtime API's own function-call id
+-- (format "call_xxxxx"), not a client-generated UUID.
 -- ---------------------------------------------------------------------------
 create table bookings (
   id uuid primary key default gen_random_uuid(),
@@ -200,7 +214,7 @@ create table bookings (
   requested_at timestamptz not null,
   status booking_status not null default 'requested',
   notes text,
-  idempotency_key uuid unique,
+  idempotency_key text unique,
   created_at timestamptz not null default now()
 );
 
@@ -216,7 +230,7 @@ create table service_requests (
   device_model text not null,
   issue text not null,
   status service_request_status not null default 'new',
-  idempotency_key uuid unique,
+  idempotency_key text unique,
   created_at timestamptz not null default now()
 );
 

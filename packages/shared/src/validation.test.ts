@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { normalizePhoneNumber, normalizeTicketNumber, phoneNumberSchema, ticketNumberSchema } from "./validation.js";
+import {
+  likeContains,
+  normalizePhoneNumber,
+  normalizeTicketNumber,
+  phoneNumberSchema,
+  ticketNumberSchema,
+} from "./validation.js";
 
 describe("normalizePhoneNumber", () => {
   it("normalizes a plain number to E.164-ish form", () => {
@@ -22,6 +28,20 @@ describe("normalizePhoneNumber", () => {
 describe("normalizeTicketNumber", () => {
   it("uppercases and strips whitespace", () => {
     expect(normalizeTicketNumber(" rp 1024 ")).toBe("RP1024");
+  });
+});
+
+describe("likeContains", () => {
+  it("wraps a plain value in wildcards for a substring match", () => {
+    expect(likeContains("A15")).toBe("%A15%");
+  });
+
+  it("escapes literal LIKE wildcard characters in the input", () => {
+    expect(likeContains("50%_off")).toBe("%50\\%\\_off%");
+  });
+
+  it("escapes a literal backslash", () => {
+    expect(likeContains("a\\b")).toBe("%a\\\\b%");
   });
 });
 

@@ -1,3 +1,4 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { describe, expect, it } from "vitest";
 import { createMockSupabaseClient, ok } from "@phone-ai/shared/testUtils";
 import { runToolCall } from "./toolExecutor.js";
@@ -60,5 +61,74 @@ describe("runToolCall", () => {
     expect(outcome.createdBookingId).toBe("booking-1");
     expect(outcome.customerRequestType).toBe("booking");
     expect(outcome.pendingAction).toBeNull();
+  });
+
+  it("stamps the Realtime API's function-call id as the idempotency key when the model didn't supply one", async () => {
+    const future = new Date(Date.now() + 86_400_000).toISOString();
+    let insertedPayload: Record<string, unknown> | undefined;
+    const supabase: SupabaseClient = {
+      from(table: string) {
+        if (table === "customers") {
+          return {
+            select: () => ({
+              eq: () => ({ maybeSingle: () => Promise.resolve({ data: { id: "cust1" }, error: null }) }),
+            }),
+          };
+        }
+        // table === "bookings"
+        return {
+          select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: null, error: null }) }) }),
+          insert: (payload: Record<string, unknown>) => {
+            insertedPayload = payload;
+            return { select: () => ({ single: () => Promise.resolve({ data: { id: "booking-1" }, error: null }) }) };
+          },
+        };
+      },
+    } as unknown as SupabaseClient;
+
+    await runToolCall(supabase, "call-1", {
+      callId: "call_realtime_abc123",
+      name: "createBooking",
+      argumentsJson: JSON.stringify({
+        customerDetails: { name: "Anand", phoneNumber: "+919876543210" },
+        service: "Screen replacement",
+        requestedDateTime: future,
+      }),
+    });
+
+    expect(insertedPayload?.idempotency_key).toBe("call_realtime_abc123");
+  });
+
+  it("does not override an idempotency key the model already supplied", async () => {
+    let lookupKey: unknown;
+    const supabase: SupabaseClient = {
+      from(table: string) {
+        if (table === "service_requests") {
+          return {
+            select: () => ({
+              eq: (_col: string, value: unknown) => {
+                lookupKey = value;
+                return { maybeSingle: () => Promise.resolve({ data: { id: "already-there" }, error: null }) };
+              },
+            }),
+          };
+        }
+        throw new Error(`unexpected table ${table}`);
+      },
+    } as unknown as SupabaseClient;
+
+    const outcome = await runToolCall(supabase, "call-1", {
+      callId: "call_realtime_xyz",
+      name: "createServiceRequest",
+      argumentsJson: JSON.stringify({
+        customerDetails: { name: "Anand", phoneNumber: "+919876543210" },
+        deviceModel: "Samsung A15",
+        issue: "cracked screen",
+        idempotencyKey: "model-supplied-key",
+      }),
+    });
+
+    expect(lookupKey).toBe("model-supplied-key");
+    expect(outcome.result.ok).toBe(true);
   });
 });

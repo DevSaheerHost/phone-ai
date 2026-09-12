@@ -4,6 +4,65 @@ This document records the security review performed on this codebase
 before considering it ready for a first production deployment. It follows
 the categories in the review checklist used to build this system.
 
+## Follow-up review — critical finding and fix
+
+A second, deeper review (focused on the end-to-end call flow, RLS, and the
+OpenAI Realtime protocol) found one **critical** issue that the initial
+review missed:
+
+**`admin_roles` had no Row Level Security policy at all.** Every other
+table's authorization depends on `is_admin()`, which checks membership in
+`admin_roles` — but the table gating that check was never itself locked
+down. In a live Supabase project this would have let any signed-up,
+non-admin user read the full admin roster and, more seriously, **insert a
+row granting themselves admin access**, bypassing every other control in
+this document. Verified against a real local Postgres instance (not just
+inspection): before the fix, a non-admin `authenticated` role could select
+and insert into `admin_roles` freely; after adding
+`alter table admin_roles enable row level security;` plus an admin-only
+`select` policy (deliberately no insert/update/delete policy — rows are
+provisioned only via the service-role key), the same session was blocked
+from reading the table, from self-granting admin, and consequently from
+reading any RLS-protected business table too, while a genuine admin
+retained full access. Fixed in `supabase/migrations/0001_init.sql`.
+
+This has not been applied to any live Supabase project (per the earlier
+decision to ship migration files only, not provision a live database), so
+no real deployment was ever exposed — but this must be re-verified after
+`supabase db push` against your actual project before granting anyone
+dashboard access.
+
+### Other correctness/reliability fixes from the same review
+
+Not security vulnerabilities in the traditional sense, but bugs that would
+have broken the core product on a real call:
+
+- **Every AI tool call would have failed.** The OpenAI Realtime API
+  rejects `response.create` while a response is still active, but the code
+  was calling it immediately after `response.function_call_arguments.done`
+  — which fires _before_ that response's own `response.done`. Every
+  pricing lookup, repair-status check, booking, and transfer would have
+  hit this. Fixed by buffering function calls until `response.done`
+  confirms the response has actually ended (`openaiRealtimeClient.ts`).
+- **An OpenAI outage mid-call silently dropped the caller** instead of
+  transferring to a human, which the spec requires for backend failures.
+  Fixed in `mediaBridge.ts`.
+- **Pricing/availability lookups used exact string matching**, so any
+  spelling variation between the AI's transcribed model name and the
+  shop's stored value (e.g. "A15" vs "Samsung Galaxy A15") would report
+  "no price on file" for a real, configured device. Fixed with a sanitized
+  substring match (`likeContains` in `validation.ts`) — still never
+  fabricates a price, just finds real rows more reliably.
+- **The booking/service-request idempotency key was never actually
+  populated** — it was optional and nothing ever supplied it, so the
+  protection existed in schema only. Fixed by having the voice-service
+  stamp the Realtime API's own function-call id as the key before
+  execution (`toolExecutor.ts`).
+- **`response.cancel`/`response.create` were sent unconditionally**,
+  causing a guaranteed API error on almost every normal caller turn (not
+  just real barge-in). Fixed by tracking response-active state and no-op'ing
+  both calls when there's nothing to cancel/nothing to interrupt.
+
 ## Findings and mitigations
 
 | Area                                  | Finding                      | Mitigation                                                                                                                                                                                                                                                                                                                                                                                                                                     |

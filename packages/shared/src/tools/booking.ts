@@ -46,7 +46,11 @@ export const createServiceRequestInputSchema = z.object({
   customerDetails: customerDetailsSchema,
   deviceModel: nonEmptyTrimmedString,
   issue: nonEmptyTrimmedString,
-  idempotencyKey: z.string().uuid().optional(),
+  // Not something the model is expected to supply — the voice-service
+  // fills this in from the Realtime API's own function-call id before
+  // executing the tool (see toolExecutor.ts), so a redelivered/duplicate
+  // call is deduped even though the model never reasons about idempotency.
+  idempotencyKey: z.string().min(1).max(200).optional(),
 });
 
 export async function createServiceRequest(
@@ -110,7 +114,9 @@ export const createBookingInputSchema = z.object({
   service: nonEmptyTrimmedString,
   requestedDateTime: z.string().datetime({ offset: true }),
   notes: z.string().trim().max(1000).optional(),
-  idempotencyKey: z.string().uuid().optional(),
+  // See the comment on createServiceRequestInputSchema — filled in by the
+  // voice-service, not the model.
+  idempotencyKey: z.string().min(1).max(200).optional(),
 });
 
 export async function createBooking(supabase: SupabaseClient, rawInput: unknown): Promise<ToolResult<{ id: string }>> {
